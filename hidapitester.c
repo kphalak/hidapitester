@@ -44,9 +44,8 @@ static void print_usage(char *myname)
 "  --send-feature <datalist>   Send Feature report (1st byte reportId, if used)\n"
 "  --read-feature <reportId>   Read Feature report (w/ reportId, 0 if unused) \n"
 "  --send-output <datalist>    Send Ouput report to device \n"
-"  --read-input                Read Input reports \n"
-"  --read-input-forever        Read Input reports in a loop forever \n"
-"  --read-input-report <reportId>  Read Input report from specific reportId \n"
+"  --read-input [reportId]     Read Input report (w/ opt. reportId, if unused)\n"
+"  --read-input-forever [rId]  Read Input reports in a loop forever \n"
 "  --length <len>, -l <len>    Set buffer length in bytes of report to send/read\n"
 "  --timeout <msecs>           Timeout in millisecs to wait for input reads \n"
 "  --base <base>, -b <base>    Set decimal or hex buffer print mode\n"
@@ -99,7 +98,6 @@ enum {
     CMD_READ_INPUT,
     CMD_READ_FEATURE,
     CMD_READ_INPUT_FOREVER,
-    CMD_READ_INPUT_REPORT,
 };
 
 bool msg_quiet = false;
@@ -221,9 +219,8 @@ int main(int argc, char* argv[])
          {"send-output",  required_argument, &cmd,   CMD_SEND_OUTPUT},
          {"send-out",     required_argument, &cmd,   CMD_SEND_OUTPUT},
          {"send-feature", required_argument, &cmd,   CMD_SEND_FEATURE},
-         {"read-input",   no_argument,       &cmd,   CMD_READ_INPUT},
-         {"read-in",      no_argument,       &cmd,   CMD_READ_INPUT},
-         {"read-input-report", required_argument, &cmd,  CMD_READ_INPUT_REPORT},
+         {"read-input",   required_argument, &cmd,   CMD_READ_INPUT},
+         {"read-in",      optional_argument, &cmd,   CMD_READ_INPUT},
          {"read-feature", required_argument, &cmd,   CMD_READ_FEATURE},
          {"read-input-forever",  optional_argument, &cmd,   CMD_READ_INPUT_FOREVER},
          {"get-report-descriptor", no_argument, &cmd, CMD_GET_REPORT_DESCRIPTOR},
@@ -279,12 +276,6 @@ int main(int argc, char* argv[])
 
                 struct hid_device_info *devs, *cur_dev;
                 devs = hid_enumerate(vid,pid); // 0,0 = find all devices
-                if (!devs) {
-                    fprintf(stderr, "No HID devices found\n");
-                    hid_exit();
-                    return 1;
-                }
-
                 cur_dev = devs;
                 while (cur_dev) {
                     if( (!usage_page || cur_dev->usage_page == usage_page) &&
@@ -328,20 +319,8 @@ int main(int argc, char* argv[])
 
                     struct hid_device_info *devs, *cur_dev;
                     devs = hid_enumerate(vid, pid); // 0,0 = find all devices
-                    if (!devs) {
-                        msg("Error: no HID devices found for given vid/pid\n");
-                        hid_exit();
-                        return 1;
-                    }
                     cur_dev = devs;
                     while (cur_dev) {
-                        msginfo("Device found: path: %s, vid: 0x%04X, pid: 0x%04X, usage_page: 0x%04X, usage: 0x%04X\n",
-                            cur_dev->path,
-                            cur_dev->vendor_id,
-                            cur_dev->product_id,
-                            cur_dev->usage_page,
-                            cur_dev->usage);
-
                         if( (!vid || cur_dev->vendor_id == vid) &&
                             (!pid || cur_dev->product_id == pid) &&
                             (!usage_page || cur_dev->usage_page == usage_page) &&
@@ -354,16 +333,13 @@ int main(int argc, char* argv[])
                     hid_free_enumeration(devs);
 
                     if( devpath[0] ) {
-                        msginfo("Opening device by path: %s\n",devpath);
-                        hid_device *handle = hid_open_path(devpath);
-                        if (!handle) {
-                            msg("Error: could not open device at path: %s\n",devpath);
-                            msg("Error: %ls\n", hid_error(handle));
-                            hid_exit();
-                            return 1;
+                        dev = hid_open_path(devpath);
+                        if( dev==NULL ) {
+                            msg("Error: could not open device\n");
                         }
-                        dev = handle;
-                        msg("Device opened\n");
+                        else {
+                            msg("Device opened\n");
+                        }
                     }
                     else {
                         msg("Error: no matching devices\n");
@@ -427,10 +403,12 @@ int main(int argc, char* argv[])
                 if( !buflen) {
                     msg("Error on read: buffer length is 0. Use --len to specify.\n"); break;
                 }
+                uint8_t report_id = (optarg) ? strtol(optarg,NULL,10) : 0;
+                buf[0] = report_id;
                 do {
-                    msg("Reading up to %d-byte input report, %d msec timeout...",
-                      buflen, timeout_millis);
-                    res = hid_read_timeout(dev, buf, buflen, timeout_millis);
+                    msg("Reading %d-byte input report %d, %d msec timeout...",
+                      buflen, report_id, timeout_millis);
+                    res = hid_get_input_report(dev, buf, buflen);
                     msg("read %d bytes:\n", res);
                     if( res > 0 ) {
                         printbuf(buf,buflen, print_base, print_width);
@@ -441,22 +419,6 @@ int main(int argc, char* argv[])
                         break;
                     }
                 } while( cmd == CMD_READ_INPUT_FOREVER );
-            }
-            else if( cmd == CMD_READ_INPUT_REPORT ) {
-                if( !dev ) {
-                    msg("Error on read: no device opened.\n"); break;
-                }
-                if( !buflen) {
-                    msg("Error on read: buffer length is 0. Use --len to specify.\n");
-                    break;
-                }
-                uint8_t report_id = (optarg) ? strtol(optarg,NULL,10) : 0;
-                buf[0] = report_id;
-                msg("Reading %d-byte input report using hid_get_input_report, report_id %d...",
-                    buflen, report_id);
-                res = hid_get_input_report(dev, buf, buflen);
-                msg("read %d bytes:\n",res);
-                printbuf(buf, buflen, print_base, print_width);
             }
             else if( cmd == CMD_READ_FEATURE ) {
 
